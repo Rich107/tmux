@@ -123,11 +123,11 @@ CMD="$(printf '%s\n' "$SELECTION" | awk -F'\t' '{print $3}')"
 TMPCMD="$(mktemp -t tmux-palette.XXXXXX)"
 printf '%s\n' "$CMD" > "$TMPCMD"
 
-# Defer: background a runner that waits a beat for THIS popup to close, then
-# replays the command in the real client/pane context — exactly like pressing
-# the key. This is what lets display-popup binds and new-window/send-keys work
-# (see the header comment). nohup + redirect keeps it alive past popup teardown.
-nohup bash -c "sleep 0.15; tmux source-file '$TMPCMD'; rm -f '$TMPCMD'" \
-  >/dev/null 2>&1 &
+# Defer: hand the runner to the tmux SERVER (run-shell -b), not to a child of
+# this popup — a popup child is killed when tmux tears the popup down. The
+# server-owned runner waits a beat for THIS popup to close, then replays the
+# command in the real client/pane context, exactly like pressing the key. This
+# is what lets display-popup binds and new-window/send-keys work (see header).
+tmux run-shell -b "sleep 0.15; tmux source-file '$TMPCMD'; rm -f '$TMPCMD'"
 
 exit 0
