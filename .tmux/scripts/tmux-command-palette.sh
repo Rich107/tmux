@@ -12,10 +12,13 @@
 # the pane that was active when the palette opened:
 #   * The command is replayed via `tmux source-file`, so tmux's own parser
 #     handles it (no shell `eval`, which would execute the $(...)/backticks that
-#     live inside complex binds). It behaves exactly like pressing the key —
-#     including honouring each binding's own `-c` working directory.
-#   * `display-popup` is an overlay and doesn't change the active pane, so an
-#     un-targeted command resolves to the pane the palette was opened from.
+#     live inside complex binds). It behaves exactly like pressing the key.
+#   * Execution is DEFERRED until this popup has closed. A popup cannot open
+#     another popup, so binds that are themselves display-popups (claude-jump,
+#     session-manager, just-picker, …) would silently fail if run from inside
+#     here; and binds like `new-window \; send-keys` need the real pane/client
+#     context, not the popup overlay. So we background a tiny delayed runner
+#     that fires once this script exits and tmux tears the popup down.
 #
 # Portable to macOS' system bash 3.2 (no associative arrays — the note/command
 # join is done in awk). Requires: tmux, fzf, awk.
@@ -116,19 +119,15 @@ TABLE="$(printf '%s\n' "$SELECTION" | awk -F'\t' '{print $2}')"
 CMD="$(printf '%s\n' "$SELECTION" | awk -F'\t' '{print $3}')"
 [[ -z "$CMD" ]] && exit 0
 
-# Replay the command through tmux's own parser. source-file runs it in the
-# current client/pane context — exactly like pressing the key.
+# Write the command to a temp file for tmux's own parser to source.
 TMPCMD="$(mktemp -t tmux-palette.XXXXXX)"
 printf '%s\n' "$CMD" > "$TMPCMD"
-OUTPUT="$(tmux source-file "$TMPCMD" 2>&1)"
-STATUS=$?
-rm -f "$TMPCMD"
 
-# Most actions produce no output and we exit so the popup closes to reveal the
-# result. If something went wrong (e.g. a copy-mode-only command), show it.
-if [[ -n "$OUTPUT" ]]; then
-  printf '\n%s\n\n  ── press Enter to close ──' "$OUTPUT"
-  read -r _
-fi
+# Defer: background a runner that waits a beat for THIS popup to close, then
+# replays the command in the real client/pane context — exactly like pressing
+# the key. This is what lets display-popup binds and new-window/send-keys work
+# (see the header comment). nohup + redirect keeps it alive past popup teardown.
+nohup bash -c "sleep 0.15; tmux source-file '$TMPCMD'; rm -f '$TMPCMD'" \
+  >/dev/null 2>&1 &
 
-exit "$STATUS"
+exit 0
